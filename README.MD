@@ -1,37 +1,36 @@
 # astro-indexnow
 
-An Astro integration that automatically submits **all built pages** to **IndexNow**
-after each build, helping search engines discover updates faster.
+A **production‑grade Astro integration** that automatically submits **only new or changed pages**
+to **IndexNow** after each build.
 
-Designed to follow Astro’s official integration patterns (like `@astrojs/sitemap`):
+This package is designed for **modern CI/CD pipelines**, **Docker-based deployments**, and
+**large static sites**, while remaining fully deterministic and explicit.
 
-- No interactive prompts
-- No automatic file mutation
-- Explicit, config‑driven usage
-- CI‑safe and deterministic
-- Zero runtime impact
+> **Version:** v2.0.0  
+> **Stateful by design. Changed-only submissions. Batch-safe. CI-aware.**
 
 ---
 
 ## What is IndexNow?
 
-[IndexNow](https://www.indexnow.org/) is a protocol supported by search engines
-such as **Bing** and **Yandex** that allows websites to proactively notify them
-when URLs are added or updated.
+[IndexNow](https://www.indexnow.org/) is a protocol supported by search engines such as **Bing**
+and **Yandex** that allows websites to proactively notify search engines when URLs are **added,
+updated, or removed**.
 
-Instead of waiting for crawlers, your site directly tells search engines
-which URLs should be re‑crawled.
+Instead of waiting for crawlers, your site tells search engines exactly which URLs changed.
 
 ---
 
-## Features
+## Key Features
 
 - 🚀 Submits URLs to IndexNow **at build time**
-- 🔁 Submits **all generated pages** every build (simple & reliable)
-- 🔒 No secrets prompted or stored automatically
-- 🧠 Uses Astro’s `site` config as the canonical base URL
-- 🧪 Safe for CI/CD pipelines
-- 🧩 No client‑side or runtime code added
+- 🔍 **Detects changed pages automatically** using HTML hashing
+- 🧠 Stores a small on-disk cache to avoid re-submitting unchanged URLs
+- 📦 **Batches submissions** safely (IndexNow 10,000 URL limit)
+- 🧪 Fully **CI/CD and Docker safe**
+- 🔒 No secrets prompted, stored, or mutated
+- 🧩 No client-side or runtime code added
+- 🧼 Quiet by default, verbose when Astro logging is enabled
 
 ---
 
@@ -49,7 +48,7 @@ npx astro add astro-indexnow
 
 > **Note**  
 > Like other Astro integrations, `astro add` installs the package but does **not**
-> inject configuration values. You must configure it manually (see below).
+> inject configuration values. Configuration is always explicit.
 
 ---
 
@@ -60,8 +59,8 @@ Generate an IndexNow API key here:
 👉 https://www.bing.com/indexnow/getstarted
 
 You will receive:
-- an **API key** (a long string)
-- instructions to create a **key file**
+- an **API key**
+- instructions to create a **key verification file**
 
 ---
 
@@ -79,7 +78,7 @@ If your key is:
 abcd1234
 ```
 
-Create this file:
+Create:
 
 ```
 public/abcd1234.txt
@@ -91,44 +90,107 @@ With **exactly this content**:
 abcd1234
 ```
 
-Astro will automatically copy this file to the build output.
+Astro will automatically copy this file into the build output.
 
-> ⚠️ The plugin does **not** create this file for you.
+> ⚠️ The integration does **not** create this file for you.
 
 ---
 
 ## Step 3 — Configure Astro
 
-Add **both** your site URL and the IndexNow integration
-to `astro.config.mjs`.
-
-### Example
+Add both your site URL and the integration to `astro.config.mjs`.
 
 ```js
-// @ts-check
+// astro.config.mjs
 import { defineConfig } from "astro/config";
 import indexnow from "astro-indexnow";
 
 export default defineConfig({
   site: "https://example.com",
-
   integrations: [
     indexnow({
-      key: "YOUR_INDEXNOW_KEY",
+      key: process.env.INDEXNOW_KEY,
     }),
   ],
 });
 ```
 
-### Using environment variables (recommended)
+Using environment variables is **strongly recommended** for CI/CD.
 
-```js
-indexnow({
-  key: process.env.INDEXNOW_KEY,
-});
+---
+
+## How It Works
+
+On every `astro build`, the integration:
+
+1. Walks the final HTML output directory
+2. Hashes each generated `index.html`
+3. Compares hashes against a stored cache
+4. Detects which URLs are **new or changed**
+5. Submits **only those URLs** to IndexNow
+6. Updates the cache after a successful build
+
+This ensures:
+- No duplicate submissions
+- No unnecessary API calls
+- Accurate change detection based on real output
+
+---
+
+## State & Cache File (Important)
+
+To detect changes between builds, the integration stores a small cache file:
+
+```
+.astro-indexnow-cache.json
 ```
 
-This keeps secrets out of version control and works cleanly in CI.
+This file:
+- Is created automatically
+- Contains only URL → hash mappings
+- Contains **no secrets**
+- Is safe to inspect, commit, or delete
+
+Deleting the file simply causes the next build to treat all pages as new.
+
+---
+
+## CI/CD & Git Deployments (Very Important)
+
+### If you deploy via Git (CI/CD):
+
+You **must commit** `.astro-indexnow-cache.json` to your repository.
+
+Why:
+- CI environments are ephemeral
+- Without the cache, every build looks like a first build
+- All URLs would be re-submitted
+
+**Recommended:**
+
+```gitignore
+# DO NOT ignore this file
+!.astro-indexnow-cache.json
+```
+
+### If you deploy on a persistent server:
+
+If your build directory persists between builds (e.g. rsync, SSH, in-place deploy),
+you **should not commit** the cache file. It will persist naturally.
+
+---
+
+## Logging Behaviour
+
+- **Info logs**: high-level results (submitted, skipped, disabled)
+- **Debug logs**: cache operations, diffs, batching
+- **Warnings**: network or API failures
+
+Use Astro’s verbose logging to see internal details:
+
+```bash
+astro build --verbose
+```
 
 ---
 
@@ -142,66 +204,57 @@ Your IndexNow API key.
 
 ---
 
-### `site` (required)
+### `enabled` (optional)
 
-Type: `string`
+Type: `boolean`  
+Default: `true`
 
-Set via Astro’s config:
+Set to `false` to disable submissions entirely.
 
 ```js
-defineConfig({
-  site: "https://example.com"
-})
+indexnow({ enabled: false })
 ```
 
-Must begin with `http://` or `https://`.
+---
+
+## IndexNow Limits & Batching
+
+- IndexNow allows **up to 10,000 URLs per request**
+- This integration automatically batches submissions
+- Large sites are handled safely without configuration
 
 ---
 
-## How It Works
+## Behavioural Guarantees
 
-On every `astro build`, the integration:
-
-1. Reads Astro’s build output directory
-2. Detects all generated pages
-3. Converts them to public URLs
-4. Submits them to IndexNow via a single POST request
-
-No state is stored and no runtime code is added to your site.
-
----
-
-## Limitations
-
-- Submissions only run on `astro build`
-- Requires a valid `site` configuration
-- Requires the IndexNow key file to exist
-- Uninstalling the package does not remove config automatically
-  (same behaviour as other Astro integrations)
+- No runtime JavaScript added
+- No mutation of Astro config
+- No prompts or side effects
+- No reliance on Git history
+- Deterministic output-based change detection
 
 ---
 
 ## Philosophy
 
-This integration intentionally mirrors the behaviour of
-official Astro integrations such as:
+This integration follows the same design principles as official Astro integrations
+such as `@astrojs/sitemap`:
 
-- `@astrojs/sitemap`
-
-It avoids:
-- automatic config mutation
-- secret prompting
-- hidden side effects
-
-Everything is explicit and predictable.
+- Explicit configuration
+- Predictable behaviour
+- No magic or hidden state
+- Production-first design
 
 ---
+
 ## Maintainer
 
-Built and maintained by **Velohost** — a UK-based platform providing
-free, privacy-first infrastructure and diagnostic tools for developers.
+Built and maintained by **Velohost**  
+UK-based, privacy-first infrastructure & developer tooling.
 
 https://velohost.co.uk/
+
+---
 
 ## License
 

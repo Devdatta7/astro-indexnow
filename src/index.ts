@@ -1,7 +1,7 @@
 import type { AstroIntegration } from "astro";
 import fs from "fs";
 import path from "path";
-import { fileURLToPath } from "url";
+import crypto from "crypto";
 
 export interface IndexNowOptions {
   key?: string;
@@ -14,16 +14,85 @@ export default function indexNow(
 ): AstroIntegration {
   let site: string | null = null;
 
+  const CACHE_FILENAME = ".astro-indexnow-cache.json";
+  const projectRoot = process.cwd();
+  const cachePath = path.join(projectRoot, CACHE_FILENAME);
+
+  const INDEXNOW_ENDPOINT = "https://api.indexnow.org/indexnow";
+  const INDEXNOW_BATCH_SIZE = 10_000;
+
+  /* =========================================================
+     Helpers
+     ========================================================= */
+
+  function ensureCacheFile(logger: any) {
+    const exists = fs.existsSync(cachePath);
+    logger.debug(
+      `[astro-indexnow] cache exists: ${exists} (${cachePath})`
+    );
+
+    if (!exists) {
+      logger.debug("[astro-indexnow] creating cache file");
+      fs.writeFileSync(cachePath, "{}", "utf8");
+    }
+  }
+
+  function hashFile(filePath: string): string {
+    const contents = fs.readFileSync(filePath);
+    const hash = crypto.createHash("sha256");
+    hash.update(contents);
+    return `sha256:${hash.digest("hex")}`;
+  }
+
+  function loadCache(logger: any): Record<string, string> {
+    logger.debug("[astro-indexnow] loading cache file");
+    try {
+      return JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    } catch {
+      logger.warn("[astro-indexnow] cache file unreadable, resetting");
+      return {};
+    }
+  }
+
+  function saveCache(logger: any, data: Record<string, string>) {
+    logger.debug("[astro-indexnow] writing cache file");
+    fs.writeFileSync(cachePath, JSON.stringify(data, null, 2), "utf8");
+  }
+
+  function chunk<T>(array: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < array.length; i += size) {
+      chunks.push(array.slice(i, i + size));
+    }
+    return chunks;
+  }
+
+  /* =========================================================
+     Integration
+     ========================================================= */
+
   return {
     name: "astro-indexnow",
 
     hooks: {
-      "astro:config:setup": ({ config }) => {
+      /* -----------------------------------------------
+         Setup
+         ----------------------------------------------- */
+      "astro:config:setup": ({ config, logger }) => {
         site =
           options.siteUrl ??
           (config.site ? config.site.replace(/\/$/, "") : null);
+
+        logger.debug(
+          `[astro-indexnow] project root: ${projectRoot}`
+        );
+
+        ensureCacheFile(logger);
       },
 
+      /* -----------------------------------------------
+         Build done
+         ----------------------------------------------- */
       "astro:build:done": async ({ dir, logger }) => {
         if (options.enabled === false) {
           logger.info("[astro-indexnow] disabled");
@@ -31,31 +100,26 @@ export default function indexNow(
         }
 
         if (!options.key) {
-          throw new Error(
-            "[astro-indexnow] Missing IndexNow key. Provide it in astro.config.mjs."
-          );
+          throw new Error("[astro-indexnow] Missing IndexNow key");
         }
 
         if (!site) {
-          throw new Error(
-            "[astro-indexnow] Missing site URL. Set `site` in astro.config.mjs or pass `siteUrl`."
-          );
+          throw new Error("[astro-indexnow] Missing site URL");
         }
 
-        const outDir = fileURLToPath(dir);
-        const urls: string[] = [];
+        ensureCacheFile(logger);
+
+        const outDir = new URL(dir).pathname;
+
+        const previousCache = loadCache(logger);
+        const nextCache: Record<string, string> = {};
+        const changedUrls: string[] = [];
 
         function walk(currentDir: string) {
-          const entries = fs.readdirSync(currentDir, {
-            withFileTypes: true,
-          });
-
-          for (const entry of entries) {
+          for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
             const fullPath = path.join(currentDir, entry.name);
 
-            if (entry.isDirectory()) {
-              walk(fullPath);
-            }
+            if (entry.isDirectory()) walk(fullPath);
 
             if (entry.isFile() && entry.name === "index.html") {
               const relativePath = path
@@ -66,62 +130,77 @@ export default function indexNow(
               const url =
                 site + "/" + relativePath.replace(/^\/+/, "");
 
-              urls.push(url);
+              const hash = hashFile(fullPath);
+              nextCache[url] = hash;
+
+              if (previousCache[url] !== hash) {
+                changedUrls.push(url);
+              }
             }
           }
         }
 
         walk(outDir);
 
-        logger.info("[astro-indexnow] detected pages:");
-        for (const url of urls) {
-          logger.info(` - ${url}`);
+        logger.debug("[astro-indexnow] page diff:");
+        for (const url of Object.keys(nextCache)) {
+          const state =
+            previousCache[url] === nextCache[url]
+              ? "unchanged"
+              : "new/changed";
+          logger.debug(` - ${url} (${state})`);
         }
 
-        if (urls.length === 0) {
-          logger.warn("[astro-indexnow] no pages detected, skipping submission");
+        if (changedUrls.length === 0) {
+          logger.info(
+            "[astro-indexnow] no changed URLs detected, skipping submission"
+          );
+          saveCache(logger, nextCache);
           return;
         }
 
-        // Warn if key file is missing (do not block)
-        const keyFilePath = path.join(outDir, `${options.key}.txt`);
-        if (!fs.existsSync(keyFilePath)) {
-          logger.warn(
-            `[astro-indexnow] Key file not found: /${options.key}.txt\n` +
-              "IndexNow may reject submissions until this file exists."
+        const batches = chunk(changedUrls, INDEXNOW_BATCH_SIZE);
+
+        logger.info(
+          `[astro-indexnow] submitting ${changedUrls.length} changed URLs in ${batches.length} batch(es)`
+        );
+
+        for (let i = 0; i < batches.length; i++) {
+          const batch = batches[i];
+
+          logger.debug(
+            `[astro-indexnow] submitting batch ${i + 1}/${batches.length} (${batch.length} URLs)`
           );
-        }
 
-        // IndexNow submission
-        try {
-          const response = await fetch("https://api.indexnow.org/indexnow", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              host: new URL(site).host,
-              key: options.key,
-              keyLocation: `${site}/${options.key}.txt`,
-              urlList: urls,
-            }),
-          });
+          try {
+            const response = await fetch(INDEXNOW_ENDPOINT, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                host: new URL(site).host,
+                key: options.key,
+                keyLocation: `${site}/${options.key}.txt`,
+                urlList: batch,
+              }),
+            });
 
-          if (!response.ok) {
+            if (!response.ok) {
+              logger.warn(
+                `[astro-indexnow] batch ${i + 1} failed (${response.status})`
+              );
+            }
+          } catch {
             logger.warn(
-              `[astro-indexnow] IndexNow request failed (${response.status})`
+              `[astro-indexnow] batch ${i + 1} submission failed (network error)`
             );
-            return;
           }
-
-          logger.info(
-            `[astro-indexnow] Successfully submitted ${urls.length} URLs to IndexNow`
-          );
-        } catch {
-          logger.warn(
-            "[astro-indexnow] IndexNow submission failed (network error)"
-          );
         }
+
+        saveCache(logger, nextCache);
+
+        logger.info(
+          `[astro-indexnow] IndexNow submission complete`
+        );
       },
     },
   };
